@@ -8,7 +8,7 @@ import uuid
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 import json
-import httpx
+from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 load_dotenv()
 
