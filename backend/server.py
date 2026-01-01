@@ -30,7 +30,8 @@ db = client.mirrorplay
 
 # Emergent LLM Key
 EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
-EMERGENT_BASE_URL = "https://api.emergentai.io/v1"
+INTEGRATION_PROXY_URL = os.environ.get("INTEGRATION_PROXY_URL", "https://integrations.emergentagent.com")
+EMERGENT_BASE_URL = f"{INTEGRATION_PROXY_URL}/openai/v1"
 
 # ============ MODELS ============
 
