@@ -970,6 +970,689 @@ async def purchase_item(user_id: str, item_id: str):
     
     return {"success": True, "item": item}
 
+# ============ COMMUNITY SCENARIOS ============
+
+class CommunityScenario(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str
+    description: str
+    category: str
+    difficulty: str
+    context: str
+    ai_role: str
+    user_goal: str
+    tags: List[str] = []
+    author_id: str
+    author_name: str = ""
+    is_approved: bool = True  # Auto-approve for MVP
+    rating: float = 0.0
+    rating_count: int = 0
+    plays: int = 0
+    likes: List[str] = []
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+@app.post("/api/community-scenarios")
+async def create_community_scenario(
+    title: str, description: str, category: str, difficulty: str,
+    context: str, ai_role: str, user_goal: str, tags: str, author_id: str
+):
+    user = await db.users.find_one({"id": author_id})
+    author_name = user.get("username", "Anonymous") if user else "Anonymous"
+    
+    scenario = CommunityScenario(
+        title=title,
+        description=description,
+        category=category,
+        difficulty=difficulty,
+        context=context,
+        ai_role=ai_role,
+        user_goal=user_goal,
+        tags=[t.strip() for t in tags.split(",") if t.strip()],
+        author_id=author_id,
+        author_name=author_name
+    )
+    await db.community_scenarios.insert_one(scenario.dict())
+    
+    # Award XP for creating a scenario
+    if user:
+        await db.users.update_one({"id": author_id}, {"$inc": {"xp": 50, "coins": 25}})
+    
+    return scenario.dict()
+
+@app.get("/api/community-scenarios")
+async def get_community_scenarios(category: Optional[str] = None, sort_by: str = "recent"):
+    query = {"is_approved": True}
+    if category and category != "all":
+        query["category"] = category
+    
+    sort_field = "created_at" if sort_by == "recent" else "plays" if sort_by == "popular" else "rating"
+    scenarios = await db.community_scenarios.find(query).sort(sort_field, -1).to_list(50)
+    
+    for s in scenarios:
+        s.pop("_id", None)
+    return scenarios
+
+@app.post("/api/community-scenarios/{scenario_id}/rate")
+async def rate_community_scenario(scenario_id: str, rating: float, user_id: str):
+    scenario = await db.community_scenarios.find_one({"id": scenario_id})
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    
+    # Calculate new rating
+    current_rating = scenario.get("rating", 0)
+    rating_count = scenario.get("rating_count", 0)
+    new_rating = ((current_rating * rating_count) + rating) / (rating_count + 1)
+    
+    await db.community_scenarios.update_one(
+        {"id": scenario_id},
+        {"$set": {"rating": round(new_rating, 1)}, "$inc": {"rating_count": 1, "plays": 1}}
+    )
+    return {"success": True, "new_rating": round(new_rating, 1)}
+
+@app.post("/api/community-scenarios/{scenario_id}/like")
+async def like_community_scenario(scenario_id: str, user_id: str):
+    scenario = await db.community_scenarios.find_one({"id": scenario_id})
+    if not scenario:
+        raise HTTPException(status_code=404, detail="Scenario not found")
+    
+    likes = scenario.get("likes", [])
+    if user_id in likes:
+        await db.community_scenarios.update_one({"id": scenario_id}, {"$pull": {"likes": user_id}})
+        return {"liked": False, "count": len(likes) - 1}
+    else:
+        await db.community_scenarios.update_one({"id": scenario_id}, {"$push": {"likes": user_id}})
+        return {"liked": True, "count": len(likes) + 1}
+
+# ============ WEEKLY CHALLENGES ============
+
+WEEKLY_CHALLENGE_TEMPLATES = [
+    {
+        "title": "Empathy Week",
+        "description": "Focus on empathetic responses. Score 80+ on empathy in 5 sessions.",
+        "metric": "empathy",
+        "target": 80,
+        "sessions_required": 5,
+        "rewards": {"xp": 300, "coins": 150}
+    },
+    {
+        "title": "Assertiveness Challenge",
+        "description": "Practice assertive communication. Score 80+ on assertiveness in 5 sessions.",
+        "metric": "assertiveness", 
+        "target": 80,
+        "sessions_required": 5,
+        "rewards": {"xp": 300, "coins": 150}
+    },
+    {
+        "title": "Clarity Master",
+        "description": "Express yourself clearly. Score 85+ on clarity in 4 sessions.",
+        "metric": "clarity",
+        "target": 85,
+        "sessions_required": 4,
+        "rewards": {"xp": 250, "coins": 125}
+    },
+    {
+        "title": "Warmth Warrior",
+        "description": "Spread warmth in your communication. Score 80+ on warmth in 5 sessions.",
+        "metric": "warmth",
+        "target": 80,
+        "sessions_required": 5,
+        "rewards": {"xp": 300, "coins": 150}
+    },
+    {
+        "title": "All-Rounder",
+        "description": "Balance all skills. Score 75+ overall in 7 sessions.",
+        "metric": "overall_score",
+        "target": 75,
+        "sessions_required": 7,
+        "rewards": {"xp": 500, "coins": 250}
+    }
+]
+
+@app.get("/api/weekly-challenges")
+async def get_weekly_challenges():
+    # Get or create current week's challenges
+    today = datetime.utcnow()
+    week_start = today - timedelta(days=today.weekday())
+    week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_end = week_start + timedelta(days=7)
+    
+    challenges = await db.weekly_challenges.find({
+        "week_start": week_start.isoformat()
+    }).to_list(10)
+    
+    if not challenges:
+        # Create new weekly challenges
+        import random
+        selected = random.sample(WEEKLY_CHALLENGE_TEMPLATES, min(3, len(WEEKLY_CHALLENGE_TEMPLATES)))
+        
+        for template in selected:
+            challenge = {
+                "id": str(uuid.uuid4()),
+                "title": template["title"],
+                "description": template["description"],
+                "metric": template["metric"],
+                "target": template["target"],
+                "sessions_required": template["sessions_required"],
+                "rewards": template["rewards"],
+                "week_start": week_start.isoformat(),
+                "week_end": week_end.isoformat(),
+                "participants": [],
+                "created_at": datetime.utcnow().isoformat()
+            }
+            await db.weekly_challenges.insert_one(challenge)
+            challenges.append(challenge)
+    
+    for c in challenges:
+        c.pop("_id", None)
+    return challenges
+
+@app.post("/api/weekly-challenges/{challenge_id}/join")
+async def join_weekly_challenge(challenge_id: str, user_id: str):
+    challenge = await db.weekly_challenges.find_one({"id": challenge_id})
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    
+    participants = challenge.get("participants", [])
+    if any(p["user_id"] == user_id for p in participants):
+        return {"success": True, "message": "Already joined"}
+    
+    await db.weekly_challenges.update_one(
+        {"id": challenge_id},
+        {"$push": {"participants": {
+            "user_id": user_id,
+            "qualifying_sessions": 0,
+            "best_score": 0,
+            "completed": False,
+            "joined_at": datetime.utcnow().isoformat()
+        }}}
+    )
+    return {"success": True}
+
+@app.get("/api/weekly-challenges/{challenge_id}/leaderboard")
+async def get_weekly_challenge_leaderboard(challenge_id: str):
+    challenge = await db.weekly_challenges.find_one({"id": challenge_id})
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Challenge not found")
+    
+    participants = challenge.get("participants", [])
+    sorted_participants = sorted(participants, key=lambda x: (x.get("qualifying_sessions", 0), x.get("best_score", 0)), reverse=True)
+    
+    leaderboard = []
+    for i, p in enumerate(sorted_participants[:50]):
+        user = await db.users.find_one({"id": p["user_id"]})
+        if user:
+            leaderboard.append({
+                "rank": i + 1,
+                "user_id": p["user_id"],
+                "username": user.get("username", "Anonymous"),
+                "avatar": user.get("avatar", "default"),
+                "qualifying_sessions": p.get("qualifying_sessions", 0),
+                "best_score": p.get("best_score", 0),
+                "completed": p.get("completed", False)
+            })
+    
+    return leaderboard
+
+@app.post("/api/weekly-challenges/update-progress")
+async def update_challenge_progress(user_id: str, session_analysis: Dict[str, Any]):
+    # Find all active challenges the user has joined
+    today = datetime.utcnow()
+    week_start = today - timedelta(days=today.weekday())
+    week_start = week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    challenges = await db.weekly_challenges.find({
+        "week_start": week_start.isoformat(),
+        "participants.user_id": user_id
+    }).to_list(10)
+    
+    rewards_earned = {"xp": 0, "coins": 0}
+    
+    for challenge in challenges:
+        metric = challenge.get("metric", "overall_score")
+        target = challenge.get("target", 75)
+        sessions_required = challenge.get("sessions_required", 5)
+        
+        score = session_analysis.get(metric, 0)
+        
+        if score >= target:
+            # Update participant progress
+            for p in challenge.get("participants", []):
+                if p["user_id"] == user_id and not p.get("completed", False):
+                    new_qualifying = p.get("qualifying_sessions", 0) + 1
+                    new_best = max(p.get("best_score", 0), score)
+                    completed = new_qualifying >= sessions_required
+                    
+                    await db.weekly_challenges.update_one(
+                        {"id": challenge["id"], "participants.user_id": user_id},
+                        {"$set": {
+                            "participants.$.qualifying_sessions": new_qualifying,
+                            "participants.$.best_score": new_best,
+                            "participants.$.completed": completed
+                        }}
+                    )
+                    
+                    if completed:
+                        rewards_earned["xp"] += challenge["rewards"]["xp"]
+                        rewards_earned["coins"] += challenge["rewards"]["coins"]
+                        
+                        # Award rewards to user
+                        await db.users.update_one(
+                            {"id": user_id},
+                            {"$inc": {"xp": challenge["rewards"]["xp"], "coins": challenge["rewards"]["coins"]}}
+                        )
+    
+    return {"success": True, "rewards_earned": rewards_earned}
+
+# ============ VOICE JOURNALING ============
+
+class VoiceJournalEntry(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    transcript: str
+    duration: int = 0  # seconds
+    mood: Optional[str] = None
+    mood_score: int = 50  # 0-100
+    ai_reflection: Optional[str] = None
+    tags: List[str] = []
+    type: str = "reflection"  # reflection, gratitude, goal, daily
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+@app.post("/api/voice-journal")
+async def create_voice_journal_entry(
+    user_id: str, transcript: str, duration: int = 0,
+    mood: Optional[str] = None, entry_type: str = "reflection"
+):
+    # Analyze the journal entry with AI
+    try:
+        llm = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=str(uuid.uuid4()),
+            system_message="You are a supportive journaling assistant. Provide brief, thoughtful reflections."
+        )
+        llm = llm.with_model('openai', 'gpt-4o-mini')
+        llm = llm.with_params(max_tokens=200, temperature=0.7)
+        
+        prompt = f"""Based on this journal entry, provide a brief supportive reflection (2-3 sentences) and identify the mood (1-100 scale, 100 being most positive).
+
+Journal entry: "{transcript}"
+
+Respond in JSON format: {{"reflection": "your reflection here", "mood_score": 75, "tags": ["tag1", "tag2"]}}"""
+        
+        response = await llm.send_message(UserMessage(text=prompt))
+        
+        # Parse AI response
+        content = response.strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        ai_data = json.loads(content)
+    except Exception as e:
+        print(f"Voice journal AI error: {e}")
+        ai_data = {"reflection": "Thank you for sharing. Keep journaling!", "mood_score": 50, "tags": []}
+    
+    entry = VoiceJournalEntry(
+        user_id=user_id,
+        transcript=transcript,
+        duration=duration,
+        mood=mood,
+        mood_score=ai_data.get("mood_score", 50),
+        ai_reflection=ai_data.get("reflection", ""),
+        tags=ai_data.get("tags", []),
+        type=entry_type
+    )
+    
+    await db.voice_journal.insert_one(entry.dict())
+    
+    # Award XP for journaling
+    await db.users.update_one({"id": user_id}, {"$inc": {"xp": 15, "coins": 5}})
+    
+    return entry.dict()
+
+@app.get("/api/voice-journal/{user_id}")
+async def get_voice_journal_entries(user_id: str, limit: int = 30, entry_type: Optional[str] = None):
+    query = {"user_id": user_id}
+    if entry_type:
+        query["type"] = entry_type
+    
+    entries = await db.voice_journal.find(query).sort("created_at", -1).to_list(limit)
+    for e in entries:
+        e.pop("_id", None)
+    return entries
+
+@app.get("/api/voice-journal/{user_id}/stats")
+async def get_voice_journal_stats(user_id: str):
+    entries = await db.voice_journal.find({"user_id": user_id}).to_list(100)
+    
+    if not entries:
+        return {
+            "total_entries": 0,
+            "total_minutes": 0,
+            "avg_mood": 50,
+            "streak": 0,
+            "mood_trend": []
+        }
+    
+    total_duration = sum(e.get("duration", 0) for e in entries)
+    avg_mood = sum(e.get("mood_score", 50) for e in entries) / len(entries)
+    
+    # Calculate mood trend (last 7 days)
+    seven_days_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+    recent_entries = [e for e in entries if e.get("created_at", "") >= seven_days_ago]
+    mood_trend = [{"date": e.get("created_at", "")[:10], "mood": e.get("mood_score", 50)} for e in recent_entries]
+    
+    return {
+        "total_entries": len(entries),
+        "total_minutes": total_duration // 60,
+        "avg_mood": round(avg_mood, 1),
+        "streak": 0,  # Calculate based on consecutive days
+        "mood_trend": mood_trend[-7:]
+    }
+
+# ============ PARTNER PRACTICE ============
+
+class PartnerSession(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    creator_id: str
+    partner_id: Optional[str] = None
+    scenario_id: str
+    status: str = "waiting"  # waiting, active, completed
+    messages: List[Dict[str, Any]] = []
+    creator_analysis: Dict[str, Any] = {}
+    partner_analysis: Dict[str, Any] = {}
+    invite_code: str = Field(default_factory=lambda: str(uuid.uuid4())[:8].upper())
+    created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+
+@app.post("/api/partner-practice/create")
+async def create_partner_session(creator_id: str, scenario_id: str):
+    session = PartnerSession(
+        creator_id=creator_id,
+        scenario_id=scenario_id
+    )
+    await db.partner_sessions.insert_one(session.dict())
+    return session.dict()
+
+@app.post("/api/partner-practice/join")
+async def join_partner_session(invite_code: str, partner_id: str):
+    session = await db.partner_sessions.find_one({"invite_code": invite_code, "status": "waiting"})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found or already started")
+    
+    if session["creator_id"] == partner_id:
+        raise HTTPException(status_code=400, detail="Cannot join your own session")
+    
+    await db.partner_sessions.update_one(
+        {"id": session["id"]},
+        {"$set": {"partner_id": partner_id, "status": "active"}}
+    )
+    
+    session["partner_id"] = partner_id
+    session["status"] = "active"
+    session.pop("_id", None)
+    return session
+
+@app.get("/api/partner-practice/{session_id}")
+async def get_partner_session(session_id: str):
+    session = await db.partner_sessions.find_one({"id": session_id})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    session.pop("_id", None)
+    return session
+
+@app.post("/api/partner-practice/{session_id}/message")
+async def add_partner_message(session_id: str, user_id: str, content: str):
+    session = await db.partner_sessions.find_one({"id": session_id})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Determine role
+    is_creator = user_id == session["creator_id"]
+    role = "creator" if is_creator else "partner"
+    
+    # Analyze tone
+    tone_analysis = await analyze_tone(content)
+    
+    message = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "role": role,
+        "content": content,
+        "tone_analysis": tone_analysis,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    await db.partner_sessions.update_one(
+        {"id": session_id},
+        {"$push": {"messages": message}}
+    )
+    
+    return message
+
+@app.post("/api/partner-practice/{session_id}/complete")
+async def complete_partner_session(session_id: str):
+    session = await db.partner_sessions.find_one({"id": session_id})
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    messages = session.get("messages", [])
+    
+    # Calculate analysis for each participant
+    def calculate_analysis(user_id):
+        user_msgs = [m for m in messages if m.get("user_id") == user_id]
+        if not user_msgs:
+            return {"overall_score": 0, "message_count": 0}
+        
+        avg_empathy = sum(m.get("tone_analysis", {}).get("empathy", 70) for m in user_msgs) / len(user_msgs)
+        avg_assertiveness = sum(m.get("tone_analysis", {}).get("assertiveness", 70) for m in user_msgs) / len(user_msgs)
+        avg_warmth = sum(m.get("tone_analysis", {}).get("warmth", 70) for m in user_msgs) / len(user_msgs)
+        avg_clarity = sum(m.get("tone_analysis", {}).get("clarity", 70) for m in user_msgs) / len(user_msgs)
+        
+        return {
+            "empathy": round(avg_empathy, 1),
+            "assertiveness": round(avg_assertiveness, 1),
+            "warmth": round(avg_warmth, 1),
+            "clarity": round(avg_clarity, 1),
+            "overall_score": round((avg_empathy + avg_assertiveness + avg_warmth + avg_clarity) / 4, 1),
+            "message_count": len(user_msgs)
+        }
+    
+    creator_analysis = calculate_analysis(session["creator_id"])
+    partner_analysis = calculate_analysis(session.get("partner_id"))
+    
+    await db.partner_sessions.update_one(
+        {"id": session_id},
+        {"$set": {
+            "status": "completed",
+            "creator_analysis": creator_analysis,
+            "partner_analysis": partner_analysis
+        }}
+    )
+    
+    # Award XP to both participants
+    xp_reward = 40
+    for uid in [session["creator_id"], session.get("partner_id")]:
+        if uid:
+            await db.users.update_one({"id": uid}, {"$inc": {"xp": xp_reward, "coins": 20}})
+    
+    return {
+        "creator_analysis": creator_analysis,
+        "partner_analysis": partner_analysis,
+        "xp_earned": xp_reward
+    }
+
+@app.get("/api/partner-practice/user/{user_id}")
+async def get_user_partner_sessions(user_id: str):
+    sessions = await db.partner_sessions.find({
+        "$or": [{"creator_id": user_id}, {"partner_id": user_id}]
+    }).sort("created_at", -1).to_list(20)
+    
+    for s in sessions:
+        s.pop("_id", None)
+    return sessions
+
+# ============ SEASONAL EVENTS ============
+
+SEASONAL_EVENTS = [
+    {
+        "id": "summer-social",
+        "name": "Summer Social Skills",
+        "description": "Master the art of casual conversation this summer!",
+        "theme": "summer",
+        "color": "#FFB347",
+        "icon": "☀️",
+        "scenarios": ["scenario-3"],  # Dating/social scenarios
+        "bonus_xp_multiplier": 1.5,
+        "exclusive_rewards": [
+            {"id": "summer-badge", "name": "Summer Socialite", "type": "badge", "icon": "🏖️"},
+            {"id": "summer-core", "name": "Sunset Glow", "type": "core_color", "color": "#FF6B6B"}
+        ],
+        "start_month": 6,
+        "end_month": 8
+    },
+    {
+        "id": "winter-warmth",
+        "name": "Winter Warmth",
+        "description": "Spread warmth and kindness in your communication!",
+        "theme": "winter",
+        "color": "#87CEEB",
+        "icon": "❄️",
+        "scenarios": ["scenario-8", "scenario-4"],  # Support and apology scenarios
+        "bonus_xp_multiplier": 1.5,
+        "exclusive_rewards": [
+            {"id": "winter-badge", "name": "Warmth Bearer", "type": "badge", "icon": "🎄"},
+            {"id": "winter-core", "name": "Frost Crystal", "type": "core_color", "color": "#E0FFFF"}
+        ],
+        "start_month": 12,
+        "end_month": 2
+    },
+    {
+        "id": "spring-growth",
+        "name": "Spring Growth",
+        "description": "Plant seeds of personal development!",
+        "theme": "spring",
+        "color": "#98FB98",
+        "icon": "🌸",
+        "scenarios": ["scenario-5", "scenario-7"],  # Career scenarios
+        "bonus_xp_multiplier": 1.5,
+        "exclusive_rewards": [
+            {"id": "spring-badge", "name": "Growth Mindset", "type": "badge", "icon": "🌱"},
+            {"id": "spring-core", "name": "Bloom Energy", "type": "core_color", "color": "#FFB7C5"}
+        ],
+        "start_month": 3,
+        "end_month": 5
+    },
+    {
+        "id": "fall-reflection",
+        "name": "Fall Reflection",
+        "description": "Harvest wisdom through self-reflection and boundaries!",
+        "theme": "fall",
+        "color": "#DEB887",
+        "icon": "🍂",
+        "scenarios": ["scenario-1", "scenario-2", "scenario-6"],  # Boundary scenarios
+        "bonus_xp_multiplier": 1.5,
+        "exclusive_rewards": [
+            {"id": "fall-badge", "name": "Boundary Master", "type": "badge", "icon": "🍁"},
+            {"id": "fall-core", "name": "Autumn Ember", "type": "core_color", "color": "#CD853F"}
+        ],
+        "start_month": 9,
+        "end_month": 11
+    }
+]
+
+@app.get("/api/seasonal-events")
+async def get_seasonal_events():
+    current_month = datetime.utcnow().month
+    
+    active_events = []
+    upcoming_events = []
+    
+    for event in SEASONAL_EVENTS:
+        start = event["start_month"]
+        end = event["end_month"]
+        
+        # Handle year wrap (e.g., Dec-Feb)
+        if start > end:
+            is_active = current_month >= start or current_month <= end
+        else:
+            is_active = start <= current_month <= end
+        
+        event_data = {**event}
+        if is_active:
+            event_data["status"] = "active"
+            active_events.append(event_data)
+        else:
+            event_data["status"] = "upcoming"
+            upcoming_events.append(event_data)
+    
+    return {"active": active_events, "upcoming": upcoming_events}
+
+@app.get("/api/seasonal-events/{event_id}")
+async def get_seasonal_event(event_id: str):
+    event = next((e for e in SEASONAL_EVENTS if e["id"] == event_id), None)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return event
+
+@app.post("/api/seasonal-events/{event_id}/participate")
+async def participate_in_seasonal_event(event_id: str, user_id: str):
+    event = next((e for e in SEASONAL_EVENTS if e["id"] == event_id), None)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Track participation
+    participation = await db.event_participation.find_one({
+        "event_id": event_id,
+        "user_id": user_id
+    })
+    
+    if not participation:
+        await db.event_participation.insert_one({
+            "id": str(uuid.uuid4()),
+            "event_id": event_id,
+            "user_id": user_id,
+            "sessions_completed": 0,
+            "total_xp_earned": 0,
+            "rewards_claimed": [],
+            "joined_at": datetime.utcnow().isoformat()
+        })
+        return {"success": True, "message": "Joined event!"}
+    
+    return {"success": True, "message": "Already participating"}
+
+@app.get("/api/seasonal-events/{event_id}/progress/{user_id}")
+async def get_event_progress(event_id: str, user_id: str):
+    participation = await db.event_participation.find_one({
+        "event_id": event_id,
+        "user_id": user_id
+    })
+    
+    if not participation:
+        return {"participating": False}
+    
+    participation.pop("_id", None)
+    return {"participating": True, **participation}
+
+@app.get("/api/seasonal-events/{event_id}/leaderboard")
+async def get_event_leaderboard(event_id: str):
+    participants = await db.event_participation.find({
+        "event_id": event_id
+    }).sort("total_xp_earned", -1).to_list(50)
+    
+    leaderboard = []
+    for i, p in enumerate(participants):
+        user = await db.users.find_one({"id": p["user_id"]})
+        if user:
+            leaderboard.append({
+                "rank": i + 1,
+                "user_id": p["user_id"],
+                "username": user.get("username", "Anonymous"),
+                "avatar": user.get("avatar", "default"),
+                "sessions_completed": p.get("sessions_completed", 0),
+                "total_xp_earned": p.get("total_xp_earned", 0)
+            })
+    
+    return leaderboard
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
