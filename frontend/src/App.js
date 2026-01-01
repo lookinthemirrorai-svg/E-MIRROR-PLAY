@@ -1317,23 +1317,33 @@ function JourneyTab() {
 
 // Community Tab
 function CommunityTab() {
-  const { user, posts, setPosts, leaderboard, setLeaderboard, challenges, setChallenges } = useStore();
+  const { user, posts, setPosts, leaderboard, setLeaderboard } = useStore();
   const [activeSection, setActiveSection] = useState('feed');
   const [newPostContent, setNewPostContent] = useState('');
   const [loading, setLoading] = useState(true);
+  const [weeklyChallenges, setWeeklyChallenges] = useState([]);
+  const [communityScenarios, setCommunityScenarios] = useState([]);
+  const [showCreateScenario, setShowCreateScenario] = useState(false);
+  const [selectedChallenge, setSelectedChallenge] = useState(null);
+  const [challengeLeaderboard, setChallengeLeaderboard] = useState([]);
+  const [seasonalEvents, setSeasonalEvents] = useState({ active: [], upcoming: [] });
   
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
       try {
-        const [postsData, leaderboardData, challengesData] = await Promise.all([
+        const [postsData, leaderboardData, weeklyChallengesData, communityData, eventsData] = await Promise.all([
           api.getPosts(),
           api.getLeaderboard(),
-          api.getChallenges()
+          api.getWeeklyChallenges(),
+          api.getCommunityScenarios(),
+          api.getSeasonalEvents()
         ]);
         setPosts(postsData);
         setLeaderboard(leaderboardData);
-        setChallenges(challengesData);
+        setWeeklyChallenges(weeklyChallengesData);
+        setCommunityScenarios(communityData);
+        setSeasonalEvents(eventsData);
       } catch (error) {
         console.error('Failed to load community data:', error);
       }
@@ -1365,15 +1375,45 @@ function CommunityTab() {
     }
   };
   
+  const handleJoinChallenge = async (challengeId) => {
+    if (!user) return;
+    try {
+      await api.joinWeeklyChallenge(challengeId, user.id);
+      const updatedChallenges = await api.getWeeklyChallenges();
+      setWeeklyChallenges(updatedChallenges);
+    } catch (error) {
+      console.error('Failed to join challenge:', error);
+    }
+  };
+  
+  const loadChallengeLeaderboard = async (challenge) => {
+    setSelectedChallenge(challenge);
+    try {
+      const lb = await api.getWeeklyChallengeLeaderboard(challenge.id);
+      setChallengeLeaderboard(lb);
+    } catch (error) {
+      console.error('Failed to load challenge leaderboard:', error);
+    }
+  };
+  
+  const handleJoinEvent = async (eventId) => {
+    if (!user) return;
+    try {
+      await api.participateInEvent(eventId, user.id);
+    } catch (error) {
+      console.error('Failed to join event:', error);
+    }
+  };
+  
   return (
     <div className="p-4 pb-24" data-testid="community-tab">
       {/* Section Tabs */}
-      <div className="flex gap-2 mb-6">
-        {['feed', 'leaderboard', 'challenges'].map((section) => (
+      <div className="flex gap-1 mb-6 overflow-x-auto">
+        {['feed', 'scenarios', 'challenges', 'events', 'leaderboard'].map((section) => (
           <button
             key={section}
             onClick={() => setActiveSection(section)}
-            className={`flex-1 py-2 rounded-xl font-medium transition ${
+            className={`px-4 py-2 rounded-xl font-medium transition whitespace-nowrap ${
               activeSection === section
                 ? 'bg-primary-500 text-white'
                 : 'bg-white/5 text-gray-400 hover:bg-white/10'
@@ -1451,6 +1491,250 @@ function CommunityTab() {
             </div>
           )}
           
+          {activeSection === 'scenarios' && (
+            <div>
+              {/* Create Scenario Button */}
+              <button
+                onClick={() => setShowCreateScenario(!showCreateScenario)}
+                className="w-full glass-card rounded-xl p-4 mb-6 flex items-center justify-center gap-2 hover:bg-white/10 transition"
+              >
+                <Plus size={20} />
+                <span>Create Community Scenario</span>
+              </button>
+              
+              {showCreateScenario && (
+                <CreateScenarioForm 
+                  userId={user?.id}
+                  onClose={() => setShowCreateScenario(false)}
+                  onCreated={async () => {
+                    const updated = await api.getCommunityScenarios();
+                    setCommunityScenarios(updated);
+                    setShowCreateScenario(false);
+                  }}
+                />
+              )}
+              
+              {/* Community Scenarios */}
+              <div className="space-y-4">
+                {communityScenarios.length > 0 ? communityScenarios.map((scenario) => (
+                  <div key={scenario.id} className="glass-card rounded-xl p-4">
+                    <div className="flex items-start justify-between mb-2">
+                      <div>
+                        <h3 className="font-semibold">{scenario.title}</h3>
+                        <p className="text-sm text-gray-400">by {scenario.author_name}</p>
+                      </div>
+                      <span className={`px-2 py-1 rounded-full text-xs ${
+                        scenario.difficulty === 'beginner' ? 'bg-green-500/20 text-green-400' :
+                        scenario.difficulty === 'intermediate' ? 'bg-yellow-500/20 text-yellow-400' :
+                        'bg-red-500/20 text-red-400'
+                      }`}>
+                        {scenario.difficulty}
+                      </span>
+                    </div>
+                    <p className="text-gray-300 text-sm mb-3">{scenario.description}</p>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3 text-sm text-gray-400">
+                        <span className="flex items-center gap-1">
+                          <Star size={14} className="text-yellow-400" />
+                          {scenario.rating?.toFixed(1) || '0.0'}
+                        </span>
+                        <span>{scenario.plays || 0} plays</span>
+                        <span className="flex items-center gap-1">
+                          <Heart size={14} />
+                          {scenario.likes?.length || 0}
+                        </span>
+                      </div>
+                      <button className="px-3 py-1.5 bg-primary-500 rounded-lg text-sm font-medium hover:bg-primary-600 transition">
+                        Practice
+                      </button>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="text-center py-12 text-gray-400">
+                    <Globe size={48} className="mx-auto mb-4 opacity-50" />
+                    <p>No community scenarios yet</p>
+                    <p className="text-sm">Be the first to create one!</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {activeSection === 'challenges' && (
+            <div>
+              {selectedChallenge ? (
+                <div>
+                  <button 
+                    onClick={() => setSelectedChallenge(null)}
+                    className="flex items-center gap-2 text-gray-400 mb-4 hover:text-white transition"
+                  >
+                    <ChevronLeft size={20} />
+                    Back to Challenges
+                  </button>
+                  
+                  <div className="glass-card rounded-xl p-5 mb-6">
+                    <h2 className="text-xl font-bold mb-2">{selectedChallenge.title}</h2>
+                    <p className="text-gray-400 mb-4">{selectedChallenge.description}</p>
+                    <div className="flex items-center gap-4 text-sm">
+                      <span className="flex items-center gap-1">
+                        <Target size={16} className="text-primary-400" />
+                        Score {selectedChallenge.target}+ on {selectedChallenge.metric}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Zap size={16} className="text-yellow-400" />
+                        {selectedChallenge.rewards?.xp} XP
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <h3 className="text-lg font-semibold mb-4">Leaderboard</h3>
+                  <div className="space-y-3">
+                    {challengeLeaderboard.map((entry, i) => (
+                      <div key={entry.user_id} className={`glass-card rounded-xl p-4 flex items-center gap-4 ${i < 3 ? 'border border-yellow-500/30' : ''}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold ${
+                          i === 0 ? 'bg-yellow-500' : i === 1 ? 'bg-gray-400' : i === 2 ? 'bg-orange-600' : 'bg-white/10'
+                        }`}>
+                          {entry.rank}
+                        </div>
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center">
+                          {entry.username?.charAt(0).toUpperCase()}
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-medium">{entry.username}</p>
+                          <p className="text-sm text-gray-400">{entry.qualifying_sessions} qualifying sessions</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-semibold text-primary-400">{entry.best_score}</p>
+                          {entry.completed && <span className="text-xs text-green-400">Completed!</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <h2 className="text-lg font-semibold">Weekly Challenges</h2>
+                  {weeklyChallenges.length > 0 ? weeklyChallenges.map((challenge) => (
+                    <div key={challenge.id} className="glass-card rounded-xl p-5" data-testid={`challenge-${challenge.id}`}>
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h3 className="font-semibold text-lg">{challenge.title}</h3>
+                          <p className="text-sm text-gray-400">{challenge.description}</p>
+                        </div>
+                        <div className="bg-accent-500/20 text-accent-400 px-3 py-1 rounded-full text-sm font-medium">
+                          Active
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm text-gray-400 mb-4">
+                        <span className="flex items-center gap-1">
+                          <Users size={16} />
+                          {challenge.participants?.length || 0} joined
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Zap size={16} className="text-yellow-400" />
+                          {challenge.rewards?.xp || 100} XP + {challenge.rewards?.coins || 50} coins
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Target size={16} />
+                          {challenge.sessions_required} sessions
+                        </span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => handleJoinChallenge(challenge.id)}
+                          className="flex-1 px-4 py-2 bg-primary-500 rounded-lg text-sm font-medium hover:bg-primary-600 transition"
+                        >
+                          Join Challenge
+                        </button>
+                        <button 
+                          onClick={() => loadChallengeLeaderboard(challenge)}
+                          className="px-4 py-2 bg-white/10 rounded-lg text-sm font-medium hover:bg-white/20 transition"
+                        >
+                          <Trophy size={18} />
+                        </button>
+                      </div>
+                    </div>
+                  )) : (
+                    <div className="text-center py-12 text-gray-400">
+                      <Trophy size={48} className="mx-auto mb-4 opacity-50" />
+                      <p>No active challenges</p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+          
+          {activeSection === 'events' && (
+            <div>
+              {/* Active Seasonal Events */}
+              {seasonalEvents.active?.length > 0 && (
+                <>
+                  <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                    <Sparkles size={20} className="text-yellow-400" />
+                    Active Events
+                  </h2>
+                  {seasonalEvents.active.map((event) => (
+                    <div 
+                      key={event.id} 
+                      className="glass-card rounded-xl p-5 mb-4"
+                      style={{ borderColor: event.color, borderWidth: 2 }}
+                    >
+                      <div className="flex items-center gap-3 mb-3">
+                        <span className="text-3xl">{event.icon}</span>
+                        <div>
+                          <h3 className="font-bold text-lg">{event.name}</h3>
+                          <p className="text-sm text-gray-400">{event.description}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 text-sm text-gray-400 mb-4">
+                        <span className="flex items-center gap-1">
+                          <Zap size={16} className="text-yellow-400" />
+                          {event.bonus_xp_multiplier}x XP Bonus
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <Gift size={16} className="text-pink-400" />
+                          {event.exclusive_rewards?.length || 0} Exclusive Rewards
+                        </span>
+                      </div>
+                      <div className="flex gap-2 mb-4">
+                        {event.exclusive_rewards?.map((reward) => (
+                          <div key={reward.id} className="bg-white/10 rounded-lg px-3 py-2 text-sm">
+                            <span>{reward.icon || '🎁'}</span>
+                            <span className="ml-2">{reward.name}</span>
+                          </div>
+                        ))}
+                      </div>
+                      <button 
+                        onClick={() => handleJoinEvent(event.id)}
+                        className="w-full px-4 py-2 rounded-lg font-medium transition"
+                        style={{ backgroundColor: event.color }}
+                      >
+                        Participate Now
+                      </button>
+                    </div>
+                  ))}
+                </>
+              )}
+              
+              {/* Upcoming Events */}
+              {seasonalEvents.upcoming?.length > 0 && (
+                <>
+                  <h2 className="text-lg font-semibold mb-4 mt-6">Upcoming Events</h2>
+                  <div className="grid grid-cols-2 gap-3">
+                    {seasonalEvents.upcoming.slice(0, 4).map((event) => (
+                      <div key={event.id} className="glass-card rounded-xl p-4 opacity-70">
+                        <span className="text-2xl">{event.icon}</span>
+                        <h4 className="font-medium mt-2">{event.name}</h4>
+                        <p className="text-xs text-gray-400">{event.theme}</p>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+          
           {activeSection === 'leaderboard' && (
             <div className="space-y-3">
               {leaderboard.map((entry, i) => (
@@ -1487,49 +1771,151 @@ function CommunityTab() {
               ))}
             </div>
           )}
-          
-          {activeSection === 'challenges' && (
-            <div className="space-y-4">
-              {challenges.length > 0 ? (
-                challenges.map((challenge) => (
-                  <div key={challenge.id} className="glass-card rounded-xl p-5" data-testid={`challenge-${challenge.id}`}>
-                    <div className="flex items-start justify-between mb-3">
-                      <div>
-                        <h3 className="font-semibold text-lg">{challenge.title}</h3>
-                        <p className="text-sm text-gray-400">{challenge.description}</p>
-                      </div>
-                      <div className="bg-accent-500/20 text-accent-400 px-3 py-1 rounded-full text-sm font-medium">
-                        Active
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4 text-sm text-gray-400">
-                        <span className="flex items-center gap-1">
-                          <Users size={16} />
-                          {challenge.participants?.length || 0} joined
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Zap size={16} className="text-yellow-400" />
-                          {challenge.rewards?.xp || 100} XP
-                        </span>
-                      </div>
-                      <button className="px-4 py-2 bg-primary-500 rounded-lg text-sm font-medium hover:bg-primary-600 transition">
-                        Join
-                      </button>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-12 text-gray-400">
-                  <Trophy size={48} className="mx-auto mb-4 opacity-50" />
-                  <p>No active challenges right now</p>
-                  <p className="text-sm">Check back soon!</p>
-                </div>
-              )}
-            </div>
-          )}
         </>
       )}
+    </div>
+  );
+}
+
+// Create Scenario Form Component
+function CreateScenarioForm({ userId, onClose, onCreated }) {
+  const [formData, setFormData] = useState({
+    title: '',
+    description: '',
+    category: 'workplace',
+    difficulty: 'intermediate',
+    context: '',
+    ai_role: '',
+    user_goal: '',
+    tags: ''
+  });
+  const [submitting, setSubmitting] = useState(false);
+  
+  const handleSubmit = async () => {
+    if (!formData.title || !formData.context || !formData.ai_role) return;
+    
+    setSubmitting(true);
+    try {
+      await api.createCommunityScenario({
+        ...formData,
+        author_id: userId
+      });
+      onCreated();
+    } catch (error) {
+      console.error('Failed to create scenario:', error);
+    }
+    setSubmitting(false);
+  };
+  
+  return (
+    <div className="glass-card rounded-xl p-5 mb-6">
+      <h3 className="text-lg font-semibold mb-4">Create New Scenario</h3>
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium mb-1">Title</label>
+          <input
+            type="text"
+            value={formData.title}
+            onChange={(e) => setFormData({...formData, title: e.target.value})}
+            className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:border-primary-500"
+            placeholder="e.g., Negotiating a Contract"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Description</label>
+          <textarea
+            value={formData.description}
+            onChange={(e) => setFormData({...formData, description: e.target.value})}
+            className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:border-primary-500"
+            rows={2}
+            placeholder="Brief description of the scenario"
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Category</label>
+            <select
+              value={formData.category}
+              onChange={(e) => setFormData({...formData, category: e.target.value})}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg focus:outline-none"
+            >
+              <option value="workplace">Workplace</option>
+              <option value="family">Family</option>
+              <option value="dating">Dating</option>
+              <option value="relationships">Relationships</option>
+              <option value="career">Career</option>
+              <option value="friendship">Friendship</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Difficulty</label>
+            <select
+              value={formData.difficulty}
+              onChange={(e) => setFormData({...formData, difficulty: e.target.value})}
+              className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg focus:outline-none"
+            >
+              <option value="beginner">Beginner</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="advanced">Advanced</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Context</label>
+          <textarea
+            value={formData.context}
+            onChange={(e) => setFormData({...formData, context: e.target.value})}
+            className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:border-primary-500"
+            rows={2}
+            placeholder="Set the scene for the practice session"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">AI Role</label>
+          <textarea
+            value={formData.ai_role}
+            onChange={(e) => setFormData({...formData, ai_role: e.target.value})}
+            className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:border-primary-500"
+            rows={2}
+            placeholder="Describe who the AI will play as"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">User Goal</label>
+          <input
+            type="text"
+            value={formData.user_goal}
+            onChange={(e) => setFormData({...formData, user_goal: e.target.value})}
+            className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:border-primary-500"
+            placeholder="What should the user practice?"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Tags (comma-separated)</label>
+          <input
+            type="text"
+            value={formData.tags}
+            onChange={(e) => setFormData({...formData, tags: e.target.value})}
+            className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:border-primary-500"
+            placeholder="negotiation, business, assertiveness"
+          />
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 bg-white/10 rounded-lg font-medium hover:bg-white/20 transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={submitting || !formData.title || !formData.context}
+            className="flex-1 px-4 py-2 bg-primary-500 rounded-lg font-medium hover:bg-primary-600 transition disabled:opacity-50"
+          >
+            {submitting ? 'Creating...' : 'Create Scenario'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
