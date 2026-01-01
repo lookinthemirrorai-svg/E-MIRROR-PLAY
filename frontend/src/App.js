@@ -1048,6 +1048,8 @@ function PracticeTab() {
   const [selectedScenario, setSelectedScenario] = useState(null);
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [loading, setLoading] = useState(true);
+  const [showJournalModal, setShowJournalModal] = useState(false);
+  const [showPartnerModal, setShowPartnerModal] = useState(false);
   
   const categories = ['all', 'workplace', 'family', 'dating', 'relationships', 'career', 'friendship'];
   
