@@ -12,7 +12,8 @@ import {
   Plus, Search, Filter, BarChart2, Sparkles, RefreshCw
 } from 'lucide-react';
 
-const API_BASE = (process.env.REACT_APP_BACKEND_URL || '') + '/api';
+// Use REACT_APP_BACKEND_URL or fall back to /api for same-origin requests
+const API_BASE = process.env.REACT_APP_BACKEND_URL ? `${process.env.REACT_APP_BACKEND_URL}/api` : '/api';
 
 // ============ ZUSTAND STORE ============
 const useStore = create((set, get) => ({
