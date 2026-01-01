@@ -12,7 +12,7 @@ import {
   Plus, Search, Filter, BarChart2, Sparkles, RefreshCw
 } from 'lucide-react';
 
-const API_BASE = process.env.REACT_APP_BACKEND_URL || '/api';
+const API_BASE = (process.env.REACT_APP_BACKEND_URL || '') + '/api';
 
 // ============ ZUSTAND STORE ============
 const useStore = create((set, get) => ({
