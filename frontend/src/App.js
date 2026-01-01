@@ -1194,6 +1194,21 @@ function PracticeTab() {
           ))}
         </div>
       )}
+      
+      {/* Voice Journal Modal */}
+      <VoiceJournalingModal
+        isOpen={showJournalModal}
+        onClose={() => setShowJournalModal(false)}
+        userId={user?.id}
+      />
+      
+      {/* Partner Practice Modal */}
+      <PartnerPracticeModal
+        isOpen={showPartnerModal}
+        onClose={() => setShowPartnerModal(false)}
+        userId={user?.id}
+        scenarios={scenarios}
+      />
     </div>
   );
 }
