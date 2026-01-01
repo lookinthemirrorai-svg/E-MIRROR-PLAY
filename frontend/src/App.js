@@ -190,6 +190,124 @@ const api = {
   async getUserSessions(userId) {
     const res = await fetch(`${API_BASE}/users/${userId}/sessions`);
     return res.json();
+  },
+  
+  // Community Scenarios
+  async getCommunityScenarios(category = null, sortBy = 'recent') {
+    const params = new URLSearchParams();
+    if (category) params.append('category', category);
+    params.append('sort_by', sortBy);
+    const res = await fetch(`${API_BASE}/community-scenarios?${params}`);
+    return res.json();
+  },
+  
+  async createCommunityScenario(data) {
+    const params = new URLSearchParams(data);
+    const res = await fetch(`${API_BASE}/community-scenarios?${params}`, { method: 'POST' });
+    return res.json();
+  },
+  
+  async rateCommunityScenario(scenarioId, rating, userId) {
+    const res = await fetch(`${API_BASE}/community-scenarios/${scenarioId}/rate?rating=${rating}&user_id=${userId}`, { method: 'POST' });
+    return res.json();
+  },
+  
+  async likeCommunityScenario(scenarioId, userId) {
+    const res = await fetch(`${API_BASE}/community-scenarios/${scenarioId}/like?user_id=${userId}`, { method: 'POST' });
+    return res.json();
+  },
+  
+  // Weekly Challenges
+  async getWeeklyChallenges() {
+    const res = await fetch(`${API_BASE}/weekly-challenges`);
+    return res.json();
+  },
+  
+  async joinWeeklyChallenge(challengeId, userId) {
+    const res = await fetch(`${API_BASE}/weekly-challenges/${challengeId}/join?user_id=${userId}`, { method: 'POST' });
+    return res.json();
+  },
+  
+  async getWeeklyChallengeLeaderboard(challengeId) {
+    const res = await fetch(`${API_BASE}/weekly-challenges/${challengeId}/leaderboard`);
+    return res.json();
+  },
+  
+  // Voice Journaling
+  async createVoiceJournalEntry(userId, transcript, duration, mood, entryType) {
+    const params = new URLSearchParams({
+      user_id: userId,
+      transcript,
+      duration: duration.toString(),
+      entry_type: entryType
+    });
+    if (mood) params.append('mood', mood);
+    const res = await fetch(`${API_BASE}/voice-journal?${params}`, { method: 'POST' });
+    return res.json();
+  },
+  
+  async getVoiceJournalEntries(userId, limit = 30, entryType = null) {
+    const params = new URLSearchParams({ limit: limit.toString() });
+    if (entryType) params.append('entry_type', entryType);
+    const res = await fetch(`${API_BASE}/voice-journal/${userId}?${params}`);
+    return res.json();
+  },
+  
+  async getVoiceJournalStats(userId) {
+    const res = await fetch(`${API_BASE}/voice-journal/${userId}/stats`);
+    return res.json();
+  },
+  
+  // Partner Practice
+  async createPartnerSession(creatorId, scenarioId) {
+    const res = await fetch(`${API_BASE}/partner-practice/create?creator_id=${creatorId}&scenario_id=${scenarioId}`, { method: 'POST' });
+    return res.json();
+  },
+  
+  async joinPartnerSession(inviteCode, partnerId) {
+    const res = await fetch(`${API_BASE}/partner-practice/join?invite_code=${inviteCode}&partner_id=${partnerId}`, { method: 'POST' });
+    return res.json();
+  },
+  
+  async getPartnerSession(sessionId) {
+    const res = await fetch(`${API_BASE}/partner-practice/${sessionId}`);
+    return res.json();
+  },
+  
+  async sendPartnerMessage(sessionId, userId, content) {
+    const res = await fetch(`${API_BASE}/partner-practice/${sessionId}/message?user_id=${userId}&content=${encodeURIComponent(content)}`, { method: 'POST' });
+    return res.json();
+  },
+  
+  async completePartnerSession(sessionId) {
+    const res = await fetch(`${API_BASE}/partner-practice/${sessionId}/complete`, { method: 'POST' });
+    return res.json();
+  },
+  
+  async getUserPartnerSessions(userId) {
+    const res = await fetch(`${API_BASE}/partner-practice/user/${userId}`);
+    return res.json();
+  },
+  
+  // Seasonal Events
+  async getSeasonalEvents() {
+    const res = await fetch(`${API_BASE}/seasonal-events`);
+    return res.json();
+  },
+  
+  async participateInEvent(eventId, userId) {
+    const res = await fetch(`${API_BASE}/seasonal-events/${eventId}/participate?user_id=${userId}`, { method: 'POST' });
+    return res.json();
+  },
+  
+  async getEventProgress(eventId, userId) {
+    const res = await fetch(`${API_BASE}/seasonal-events/${eventId}/progress/${userId}`);
+    return res.json();
+  },
+  
+  async getEventLeaderboard(eventId) {
+    const res = await fetch(`${API_BASE}/seasonal-events/${eventId}/leaderboard`);
+    return res.json();
   }
 };
 
