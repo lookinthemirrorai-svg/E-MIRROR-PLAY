@@ -9,7 +9,8 @@ import {
   Home, Target, Users, ShoppingBag, User, Trophy, Flame, Star,
   MessageCircle, Heart, Share2, Gift, Volume2, VolumeX, Settings,
   Award, Zap, Book, Calendar, TrendingUp, Clock, Check, X,
-  Plus, Search, Filter, BarChart2, Sparkles, RefreshCw
+  Plus, Search, Filter, BarChart2, Sparkles, RefreshCw, Copy,
+  UserPlus, Globe, Snowflake, Sun, Leaf, Cloud, PenTool, Radio
 } from 'lucide-react';
 
 // Use REACT_APP_BACKEND_URL or fall back to /api for same-origin requests
