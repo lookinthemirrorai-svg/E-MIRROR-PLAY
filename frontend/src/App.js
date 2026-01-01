@@ -2187,6 +2187,673 @@ function ProfileTab() {
   );
 }
 
+// ============ VOICE JOURNALING ============
+function VoiceJournalingModal({ isOpen, onClose, userId }) {
+  const [isRecording, setIsRecording] = useState(false);
+  const [transcript, setTranscript] = useState('');
+  const [duration, setDuration] = useState(0);
+  const [entryType, setEntryType] = useState('reflection');
+  const [mood, setMood] = useState('neutral');
+  const [saving, setSaving] = useState(false);
+  const [savedEntry, setSavedEntry] = useState(null);
+  const [entries, setEntries] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [activeTab, setActiveTab] = useState('record');
+  
+  const recognitionRef = useRef(null);
+  const timerRef = useRef(null);
+  
+  useEffect(() => {
+    if (isOpen) {
+      loadEntries();
+      loadStats();
+    }
+  }, [isOpen]);
+  
+  const loadEntries = async () => {
+    try {
+      const data = await api.getVoiceJournalEntries(userId);
+      setEntries(data);
+    } catch (error) {
+      console.error('Failed to load entries:', error);
+    }
+  };
+  
+  const loadStats = async () => {
+    try {
+      const data = await api.getVoiceJournalStats(userId);
+      setStats(data);
+    } catch (error) {
+      console.error('Failed to load stats:', error);
+    }
+  };
+  
+  const startRecording = () => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      recognitionRef.current = new SpeechRecognition();
+      recognitionRef.current.continuous = true;
+      recognitionRef.current.interimResults = true;
+      
+      let finalTranscript = '';
+      
+      recognitionRef.current.onresult = (event) => {
+        let interim = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript + ' ';
+          } else {
+            interim += event.results[i][0].transcript;
+          }
+        }
+        setTranscript(finalTranscript + interim);
+      };
+      
+      recognitionRef.current.start();
+      setIsRecording(true);
+      setDuration(0);
+      
+      timerRef.current = setInterval(() => {
+        setDuration(d => d + 1);
+      }, 1000);
+    }
+  };
+  
+  const stopRecording = () => {
+    if (recognitionRef.current) {
+      recognitionRef.current.stop();
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+    setIsRecording(false);
+  };
+  
+  const saveEntry = async () => {
+    if (!transcript.trim()) return;
+    
+    setSaving(true);
+    try {
+      const entry = await api.createVoiceJournalEntry(userId, transcript.trim(), duration, mood, entryType);
+      setSavedEntry(entry);
+      setTranscript('');
+      setDuration(0);
+      loadEntries();
+      loadStats();
+    } catch (error) {
+      console.error('Failed to save entry:', error);
+    }
+    setSaving(false);
+  };
+  
+  const formatDuration = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+  
+  const moodEmojis = {
+    'great': '😊',
+    'good': '🙂',
+    'neutral': '😐',
+    'low': '😔',
+    'stressed': '😰'
+  };
+  
+  if (!isOpen) return null;
+  
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="glass-card rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden">
+        <div className="p-4 border-b border-white/10 flex items-center justify-between">
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <Book size={24} className="text-primary-400" />
+            Voice Journal
+          </h2>
+          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-lg transition">
+            <X size={20} />
+          </button>
+        </div>
+        
+        <div className="flex border-b border-white/10">
+          {['record', 'entries', 'stats'].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`flex-1 py-3 text-sm font-medium transition ${
+                activeTab === tab ? 'text-primary-400 border-b-2 border-primary-400' : 'text-gray-400'
+              }`}
+            >
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
+        </div>
+        
+        <div className="p-4 overflow-y-auto max-h-[60vh]">
+          {activeTab === 'record' && (
+            <div>
+              {savedEntry ? (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-green-500/20 flex items-center justify-center">
+                    <Check size={32} className="text-green-400" />
+                  </div>
+                  <h3 className="text-xl font-semibold mb-2">Entry Saved!</h3>
+                  <p className="text-gray-400 mb-4">{savedEntry.ai_reflection}</p>
+                  <div className="flex items-center justify-center gap-4 text-sm">
+                    <span className="flex items-center gap-1">
+                      <Zap size={16} className="text-yellow-400" />
+                      +15 XP
+                    </span>
+                    <span>Mood: {savedEntry.mood_score}/100</span>
+                  </div>
+                  <button
+                    onClick={() => setSavedEntry(null)}
+                    className="mt-6 px-6 py-2 bg-primary-500 rounded-lg font-medium"
+                  >
+                    New Entry
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Entry Type Selection */}
+                  <div className="flex gap-2 mb-4">
+                    {[
+                      { id: 'reflection', label: 'Reflection', icon: '💭' },
+                      { id: 'gratitude', label: 'Gratitude', icon: '🙏' },
+                      { id: 'goal', label: 'Goal', icon: '🎯' },
+                      { id: 'daily', label: 'Daily', icon: '📅' }
+                    ].map((type) => (
+                      <button
+                        key={type.id}
+                        onClick={() => setEntryType(type.id)}
+                        className={`flex-1 py-2 rounded-lg text-sm transition ${
+                          entryType === type.id
+                            ? 'bg-primary-500 text-white'
+                            : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                        }`}
+                      >
+                        {type.icon} {type.label}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  {/* Mood Selection */}
+                  <div className="mb-4">
+                    <p className="text-sm text-gray-400 mb-2">How are you feeling?</p>
+                    <div className="flex gap-2">
+                      {Object.entries(moodEmojis).map(([key, emoji]) => (
+                        <button
+                          key={key}
+                          onClick={() => setMood(key)}
+                          className={`flex-1 py-2 text-xl rounded-lg transition ${
+                            mood === key ? 'bg-white/20' : 'bg-white/5 hover:bg-white/10'
+                          }`}
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  
+                  {/* Recording Area */}
+                  <div className="bg-white/5 rounded-xl p-6 text-center mb-4">
+                    <button
+                      onClick={isRecording ? stopRecording : startRecording}
+                      className={`w-20 h-20 rounded-full flex items-center justify-center transition ${
+                        isRecording
+                          ? 'bg-red-500 animate-pulse'
+                          : 'bg-primary-500 hover:bg-primary-600'
+                      }`}
+                    >
+                      {isRecording ? <MicOff size={32} /> : <Mic size={32} />}
+                    </button>
+                    <p className="mt-4 text-2xl font-mono">{formatDuration(duration)}</p>
+                    <p className="text-sm text-gray-400 mt-2">
+                      {isRecording ? 'Recording... Tap to stop' : 'Tap to start recording'}
+                    </p>
+                  </div>
+                  
+                  {/* Transcript */}
+                  {transcript && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium mb-2">Transcript</label>
+                      <textarea
+                        value={transcript}
+                        onChange={(e) => setTranscript(e.target.value)}
+                        className="w-full px-3 py-2 bg-white/5 border border-white/10 rounded-lg focus:outline-none focus:border-primary-500 resize-none"
+                        rows={4}
+                      />
+                    </div>
+                  )}
+                  
+                  {/* Save Button */}
+                  <button
+                    onClick={saveEntry}
+                    disabled={!transcript.trim() || saving}
+                    className="w-full py-3 bg-gradient-to-r from-primary-500 to-accent-500 rounded-xl font-semibold hover:opacity-90 transition disabled:opacity-50"
+                  >
+                    {saving ? 'Saving...' : 'Save Entry'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          
+          {activeTab === 'entries' && (
+            <div className="space-y-3">
+              {entries.length > 0 ? entries.map((entry) => (
+                <div key={entry.id} className="glass-card rounded-xl p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm text-gray-400">
+                      {new Date(entry.created_at).toLocaleDateString()}
+                    </span>
+                    <span className="px-2 py-1 bg-white/10 rounded-full text-xs">{entry.type}</span>
+                  </div>
+                  <p className="text-gray-200 text-sm mb-2">{entry.transcript?.slice(0, 150)}...</p>
+                  {entry.ai_reflection && (
+                    <p className="text-sm text-primary-400 italic">"{entry.ai_reflection}"</p>
+                  )}
+                  <div className="flex items-center gap-4 mt-2 text-xs text-gray-400">
+                    <span>Mood: {entry.mood_score}/100</span>
+                    <span>{formatDuration(entry.duration)}</span>
+                  </div>
+                </div>
+              )) : (
+                <div className="text-center py-12 text-gray-400">
+                  <Book size={48} className="mx-auto mb-4 opacity-50" />
+                  <p>No journal entries yet</p>
+                  <p className="text-sm">Start recording to begin your journey</p>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {activeTab === 'stats' && stats && (
+            <div>
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="glass-card rounded-xl p-4 text-center">
+                  <p className="text-3xl font-bold text-primary-400">{stats.total_entries}</p>
+                  <p className="text-sm text-gray-400">Entries</p>
+                </div>
+                <div className="glass-card rounded-xl p-4 text-center">
+                  <p className="text-3xl font-bold text-accent-400">{stats.total_minutes}</p>
+                  <p className="text-sm text-gray-400">Minutes</p>
+                </div>
+                <div className="glass-card rounded-xl p-4 text-center">
+                  <p className="text-3xl font-bold text-green-400">{stats.avg_mood}</p>
+                  <p className="text-sm text-gray-400">Avg Mood</p>
+                </div>
+                <div className="glass-card rounded-xl p-4 text-center">
+                  <p className="text-3xl font-bold text-orange-400">{stats.streak}</p>
+                  <p className="text-sm text-gray-400">Streak</p>
+                </div>
+              </div>
+              
+              {stats.mood_trend?.length > 0 && (
+                <div>
+                  <h3 className="text-sm font-medium mb-3">Mood Trend (Last 7 Days)</h3>
+                  <div className="flex items-end gap-1 h-24">
+                    {stats.mood_trend.map((day, i) => (
+                      <div
+                        key={i}
+                        className="flex-1 bg-primary-500/50 rounded-t"
+                        style={{ height: `${day.mood}%` }}
+                        title={`${day.date}: ${day.mood}`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ PARTNER PRACTICE ============
+function PartnerPracticeModal({ isOpen, onClose, userId, scenarios }) {
+  const [activeTab, setActiveTab] = useState('create');
+  const [selectedScenario, setSelectedScenario] = useState(null);
+  const [inviteCode, setInviteCode] = useState('');
+  const [currentSession, setCurrentSession] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [inputText, setInputText] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [mySessions, setMySessions] = useState([]);
+  const [sessionResults, setSessionResults] = useState(null);
+  
+  useEffect(() => {
+    if (isOpen) {
+      loadMySessions();
+    }
+  }, [isOpen]);
+  
+  const loadMySessions = async () => {
+    try {
+      const sessions = await api.getUserPartnerSessions(userId);
+      setMySessions(sessions);
+    } catch (error) {
+      console.error('Failed to load sessions:', error);
+    }
+  };
+  
+  const createSession = async () => {
+    if (!selectedScenario) return;
+    
+    setLoading(true);
+    try {
+      const session = await api.createPartnerSession(userId, selectedScenario.id);
+      setCurrentSession(session);
+      setActiveTab('waiting');
+    } catch (error) {
+      console.error('Failed to create session:', error);
+    }
+    setLoading(false);
+  };
+  
+  const joinSession = async () => {
+    if (!inviteCode.trim()) return;
+    
+    setLoading(true);
+    try {
+      const session = await api.joinPartnerSession(inviteCode.trim(), userId);
+      setCurrentSession(session);
+      setMessages(session.messages || []);
+      setActiveTab('practice');
+    } catch (error) {
+      console.error('Failed to join session:', error);
+      alert('Session not found or already started');
+    }
+    setLoading(false);
+  };
+  
+  const sendMessage = async () => {
+    if (!inputText.trim() || !currentSession) return;
+    
+    try {
+      const message = await api.sendPartnerMessage(currentSession.id, userId, inputText.trim());
+      setMessages(prev => [...prev, message]);
+      setInputText('');
+    } catch (error) {
+      console.error('Failed to send message:', error);
+    }
+  };
+  
+  const endSession = async () => {
+    if (!currentSession) return;
+    
+    try {
+      const results = await api.completePartnerSession(currentSession.id);
+      setSessionResults(results);
+      setActiveTab('results');
+    } catch (error) {
+      console.error('Failed to end session:', error);
+    }
+  };
+  
+  const copyInviteCode = () => {
+    if (currentSession?.invite_code) {
+      navigator.clipboard.writeText(currentSession.invite_code);
+    }
+  };
+  
+  if (!isOpen) return null;
+  
+  return (
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="glass-card rounded-2xl w-full max-w-lg max-h-[90vh] overflow-hidden">
+        <div className="p-4 border-b border-white/10 flex items-center justify-between">
+          <h2 className="text-xl font-bold flex items-center gap-2">
+            <UserPlus size={24} className="text-accent-400" />
+            Partner Practice
+          </h2>
+          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-lg transition">
+            <X size={20} />
+          </button>
+        </div>
+        
+        <div className="p-4 overflow-y-auto max-h-[75vh]">
+          {activeTab === 'create' && (
+            <div>
+              <div className="flex gap-2 mb-6">
+                <button
+                  onClick={() => setActiveTab('create')}
+                  className="flex-1 py-2 bg-primary-500 rounded-lg font-medium"
+                >
+                  Create Session
+                </button>
+                <button
+                  onClick={() => setActiveTab('join')}
+                  className="flex-1 py-2 bg-white/10 rounded-lg font-medium hover:bg-white/20 transition"
+                >
+                  Join Session
+                </button>
+              </div>
+              
+              <h3 className="text-lg font-semibold mb-4">Select a Scenario</h3>
+              <div className="space-y-3 mb-6">
+                {scenarios?.slice(0, 5).map((scenario) => (
+                  <div
+                    key={scenario.id}
+                    onClick={() => setSelectedScenario(scenario)}
+                    className={`glass-card rounded-xl p-4 cursor-pointer transition ${
+                      selectedScenario?.id === scenario.id
+                        ? 'border-2 border-primary-500'
+                        : 'hover:bg-white/10'
+                    }`}
+                  >
+                    <h4 className="font-medium">{scenario.title}</h4>
+                    <p className="text-sm text-gray-400">{scenario.description}</p>
+                  </div>
+                ))}
+              </div>
+              
+              <button
+                onClick={createSession}
+                disabled={!selectedScenario || loading}
+                className="w-full py-3 bg-gradient-to-r from-primary-500 to-accent-500 rounded-xl font-semibold hover:opacity-90 transition disabled:opacity-50"
+              >
+                {loading ? 'Creating...' : 'Create Partner Session'}
+              </button>
+              
+              {/* My Sessions */}
+              {mySessions.length > 0 && (
+                <div className="mt-6">
+                  <h3 className="text-lg font-semibold mb-3">Recent Sessions</h3>
+                  <div className="space-y-2">
+                    {mySessions.slice(0, 3).map((session) => (
+                      <div key={session.id} className="glass-card rounded-xl p-3 flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-medium">{session.scenario_id}</p>
+                          <p className="text-xs text-gray-400">{session.status}</p>
+                        </div>
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          session.status === 'completed' ? 'bg-green-500/20 text-green-400' :
+                          session.status === 'active' ? 'bg-accent-500/20 text-accent-400' :
+                          'bg-yellow-500/20 text-yellow-400'
+                        }`}>
+                          {session.status}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          
+          {activeTab === 'join' && (
+            <div>
+              <div className="flex gap-2 mb-6">
+                <button
+                  onClick={() => setActiveTab('create')}
+                  className="flex-1 py-2 bg-white/10 rounded-lg font-medium hover:bg-white/20 transition"
+                >
+                  Create Session
+                </button>
+                <button
+                  onClick={() => setActiveTab('join')}
+                  className="flex-1 py-2 bg-primary-500 rounded-lg font-medium"
+                >
+                  Join Session
+                </button>
+              </div>
+              
+              <div className="text-center py-8">
+                <UserPlus size={48} className="mx-auto mb-4 text-accent-400" />
+                <h3 className="text-lg font-semibold mb-2">Join a Partner Session</h3>
+                <p className="text-gray-400 mb-6">Enter the invite code from your practice partner</p>
+                
+                <input
+                  type="text"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value.toUpperCase())}
+                  placeholder="Enter invite code"
+                  className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-center text-2xl font-mono tracking-widest focus:outline-none focus:border-primary-500"
+                  maxLength={8}
+                />
+                
+                <button
+                  onClick={joinSession}
+                  disabled={inviteCode.length < 4 || loading}
+                  className="w-full mt-4 py-3 bg-gradient-to-r from-primary-500 to-accent-500 rounded-xl font-semibold hover:opacity-90 transition disabled:opacity-50"
+                >
+                  {loading ? 'Joining...' : 'Join Session'}
+                </button>
+              </div>
+            </div>
+          )}
+          
+          {activeTab === 'waiting' && currentSession && (
+            <div className="text-center py-8">
+              <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-accent-500/20 flex items-center justify-center animate-pulse">
+                <Radio size={40} className="text-accent-400" />
+              </div>
+              <h3 className="text-xl font-semibold mb-2">Waiting for Partner</h3>
+              <p className="text-gray-400 mb-6">Share this code with your practice partner</p>
+              
+              <div className="bg-white/5 rounded-xl p-6 mb-6">
+                <p className="text-4xl font-mono font-bold tracking-widest mb-4">
+                  {currentSession.invite_code}
+                </p>
+                <button
+                  onClick={copyInviteCode}
+                  className="flex items-center gap-2 mx-auto px-4 py-2 bg-white/10 rounded-lg hover:bg-white/20 transition"
+                >
+                  <Copy size={18} />
+                  Copy Code
+                </button>
+              </div>
+              
+              <p className="text-sm text-gray-500">
+                The session will start automatically when your partner joins
+              </p>
+            </div>
+          )}
+          
+          {activeTab === 'practice' && currentSession && (
+            <div className="flex flex-col h-[60vh]">
+              <div className="flex-1 overflow-y-auto space-y-3 mb-4">
+                {messages.map((msg, i) => (
+                  <div
+                    key={i}
+                    className={`flex ${msg.user_id === userId ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                        msg.user_id === userId
+                          ? 'bg-primary-500/30'
+                          : 'bg-white/10'
+                      }`}
+                    >
+                      <p className="text-xs text-gray-400 mb-1">{msg.role}</p>
+                      <p>{msg.content}</p>
+                      {msg.tone_analysis && (
+                        <p className="text-xs text-gray-400 mt-2">
+                          Score: {msg.tone_analysis.overall_score}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={(e) => setInputText(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+                  placeholder="Type your message..."
+                  className="flex-1 px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:outline-none focus:border-primary-500"
+                />
+                <button
+                  onClick={sendMessage}
+                  className="px-4 py-3 bg-primary-500 rounded-xl hover:bg-primary-600 transition"
+                >
+                  <Send size={20} />
+                </button>
+              </div>
+              
+              <button
+                onClick={endSession}
+                className="mt-4 py-2 bg-red-500/20 text-red-400 rounded-xl font-medium hover:bg-red-500/30 transition"
+              >
+                End Session
+              </button>
+            </div>
+          )}
+          
+          {activeTab === 'results' && sessionResults && (
+            <div className="text-center py-8">
+              <div className="w-20 h-20 mx-auto mb-6 rounded-full bg-green-500/20 flex items-center justify-center">
+                <Trophy size={40} className="text-green-400" />
+              </div>
+              <h3 className="text-xl font-semibold mb-6">Session Complete!</h3>
+              
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="glass-card rounded-xl p-4">
+                  <p className="text-sm text-gray-400 mb-2">Your Score</p>
+                  <p className="text-3xl font-bold text-primary-400">
+                    {sessionResults.creator_analysis?.overall_score || 0}
+                  </p>
+                </div>
+                <div className="glass-card rounded-xl p-4">
+                  <p className="text-sm text-gray-400 mb-2">Partner Score</p>
+                  <p className="text-3xl font-bold text-accent-400">
+                    {sessionResults.partner_analysis?.overall_score || 0}
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex items-center justify-center gap-4 text-sm mb-6">
+                <span className="flex items-center gap-1">
+                  <Zap size={16} className="text-yellow-400" />
+                  +{sessionResults.xp_earned} XP each
+                </span>
+              </div>
+              
+              <button
+                onClick={() => {
+                  setCurrentSession(null);
+                  setSessionResults(null);
+                  setMessages([]);
+                  setActiveTab('create');
+                }}
+                className="w-full py-3 bg-gradient-to-r from-primary-500 to-accent-500 rounded-xl font-semibold"
+              >
+                New Session
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ============ MAIN APP ============
 function App() {
   const { user, setUser, currentTab } = useStore();
