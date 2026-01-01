@@ -1157,7 +1157,6 @@ function PracticeTab() {
           </div>
         </button>
       </div>
-      </div>
       
       {/* Category Filter */}
       <div className="flex gap-2 overflow-x-auto pb-4 mb-4 scrollbar-hide">
