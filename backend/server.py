@@ -283,34 +283,22 @@ DAILY_PROMPTS = [
 # ============ HELPER FUNCTIONS ============
 
 async def call_llm(messages: List[Dict], system_prompt: str = "") -> str:
-    """Call the LLM using Emergent API"""
+    """Call the LLM using Emergent integrations library"""
     try:
-        headers = {
-            "Authorization": f"Bearer {EMERGENT_LLM_KEY}",
-            "Content-Type": "application/json"
-        }
+        # Create chat instance with system prompt
+        llm = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=str(uuid.uuid4()),
+            system_message=system_prompt or "You are a helpful assistant.",
+            initial_messages=[{"role": m["role"], "content": m["content"]} for m in messages[:-1]] if len(messages) > 1 else None
+        )
+        llm = llm.with_model('openai', 'gpt-4o-mini')
+        llm = llm.with_params(max_tokens=1000, temperature=0.8)
         
-        formatted_messages = []
-        if system_prompt:
-            formatted_messages.append({"role": "system", "content": system_prompt})
-        formatted_messages.extend(messages)
-        
-        payload = {
-            "model": "gpt-4o-mini",
-            "messages": formatted_messages,
-            "max_tokens": 1000,
-            "temperature": 0.8
-        }
-        
-        async with httpx.AsyncClient(timeout=60.0) as http_client:
-            response = await http_client.post(
-                f"{EMERGENT_BASE_URL}/chat/completions",
-                headers=headers,
-                json=payload
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+        # Get the last user message
+        last_message = messages[-1]["content"] if messages else "Hello"
+        response = await llm.send_message(UserMessage(text=last_message))
+        return response
     except Exception as e:
         print(f"LLM Error: {e}")
         return "I'm having trouble responding right now. Let's continue our conversation."
@@ -333,34 +321,23 @@ Text to analyze: "{text}"
 
 Respond ONLY with valid JSON, no markdown."""
         
-        headers = {
-            "Authorization": f"Bearer {EMERGENT_LLM_KEY}",
-            "Content-Type": "application/json"
-        }
+        llm = LlmChat(
+            api_key=EMERGENT_LLM_KEY,
+            session_id=str(uuid.uuid4()),
+            system_message="You are a tone analyzer. Always respond with valid JSON only."
+        )
+        llm = llm.with_model('openai', 'gpt-4o-mini')
+        llm = llm.with_params(max_tokens=500, temperature=0.3)
         
-        payload = {
-            "model": "gpt-4o-mini",
-            "messages": [{"role": "user", "content": prompt}],
-            "max_tokens": 500,
-            "temperature": 0.3
-        }
+        response = await llm.send_message(UserMessage(text=prompt))
         
-        async with httpx.AsyncClient(timeout=30.0) as http_client:
-            response = await http_client.post(
-                f"{EMERGENT_BASE_URL}/chat/completions",
-                headers=headers,
-                json=payload
-            )
-            response.raise_for_status()
-            data = response.json()
-            content = data["choices"][0]["message"]["content"]
-            # Clean up potential markdown
-            content = content.strip()
-            if content.startswith("```"):
-                content = content.split("```")[1]
-                if content.startswith("json"):
-                    content = content[4:]
-            return json.loads(content)
+        # Clean up potential markdown
+        content = response.strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
+        return json.loads(content)
     except Exception as e:
         print(f"Tone analysis error: {e}")
         return {
