@@ -1120,6 +1120,7 @@ function PracticeTab() {
         </button>
         <button
           className="glass-card rounded-xl p-4 flex items-center gap-3 hover:bg-white/10 transition"
+          onClick={() => setShowJournalModal(true)}
           data-testid="voice-journal-btn"
         >
           <div className="p-2 rounded-full bg-accent-500/20">
@@ -1130,6 +1131,32 @@ function PracticeTab() {
             <p className="text-xs text-gray-400">Reflect & grow</p>
           </div>
         </button>
+        <button
+          className="glass-card rounded-xl p-4 flex items-center gap-3 hover:bg-white/10 transition"
+          onClick={() => setShowPartnerModal(true)}
+          data-testid="partner-practice-btn"
+        >
+          <div className="p-2 rounded-full bg-green-500/20">
+            <UserPlus size={20} className="text-green-400" />
+          </div>
+          <div className="text-left">
+            <p className="font-medium">Partner Practice</p>
+            <p className="text-xs text-gray-400">Practice with a friend</p>
+          </div>
+        </button>
+        <button
+          className="glass-card rounded-xl p-4 flex items-center gap-3 hover:bg-white/10 transition"
+          data-testid="breathing-btn"
+        >
+          <div className="p-2 rounded-full bg-blue-500/20">
+            <Cloud size={20} className="text-blue-400" />
+          </div>
+          <div className="text-left">
+            <p className="font-medium">Breathing</p>
+            <p className="text-xs text-gray-400">Calm & center</p>
+          </div>
+        </button>
+      </div>
       </div>
       
       {/* Category Filter */}
